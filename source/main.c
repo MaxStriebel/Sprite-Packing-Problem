@@ -10,7 +10,17 @@
 
 #define MIN(A, B) ((A) < (B) ? (A) : (B))
 #define MAX(A, B) ((A) > (B) ? (A) : (B))
+#define CLAMP(a, min, max) (MAX(MIN(a, max), min))
 #define ARRAY_COUNT(Array) (sizeof(Array) / sizeof(Array[0]))
+#define sizeof_member(type, member) sizeof(((type *)0)->member)
+#define typeof_member(type, member) typeof(((type *)0)->member)
+
+#include "spritePacking.c"
+#include "genetic.c"
+
+#if 0
+#define PRINT_ITERATIONS
+int ScoreIteration = 0;
 
 typedef struct
 {
@@ -38,16 +48,26 @@ typedef struct
     uint8_t *Cells;
 }problem;
 
-shape shape_allocate(int Width, int Height)
+typedef struct
 {
-    shape Result =
-    {
-        .Width = Width,
-        .Height = Height,
-        .Cells = calloc(Width * Height, sizeof (Result.Cells[0]))
-    };
+    vector *Point;
+    int Score;
+    double Weight;
+}individual;
+
+typedef struct
+{
+    int currentPopulationSize;
+    int nextPopulationSize;
+}settings;
+
+int pcg32_range(int min, int max)
+{
+    int Result = pcg32_boundedrand(max - min) + min;
     return Result;
 }
+
+
 
 vector vector_add(vector A, vector B)
 {
@@ -229,14 +249,80 @@ score calculateScore(problem *Problem, vector *Offsets)
     int Width = MaxX - MinX;
     int Height = MaxY - MinY;
     int Error = MAX(Width, Height) * Overlap;
-    //Error = 5 * Overlap;
+    Error = 10000 * Overlap;
     score Result =
     {
         .Score = Width * Height + Error,
         .RawScore = Width * Height,
         .Overlap = Overlap > 0
     };
+#ifdef PRINT_ITERATIONS
+    printf("%i, %i, %i\n", ScoreIteration++, Result.Score, Result.Overlap);
+#endif
     return Result;
+}
+
+
+void genetic_optimize(problem *Problem, settings *Settings, individual *Current, individual *Next)
+{
+    assert(Settings->currentPopulationSize >= 2);
+    assert(Settings->nextPopulationSize >= 1);
+    Next[0].Score = INT_MAX;
+    double InverseSum = 0;
+    for(int i = 0; i < Settings->currentPopulationSize; i++)
+    {   int Score = calculateScore(Problem, Current[i].Point).Score;
+        Current[i].Score = Score;
+        InverseSum += 1.0 / Score;
+        if(Next[0].Score > Score)
+            Next[0] = Current[i];
+    }
+    for(int i = 0; i < Settings->currentPopulationSize; i++)
+        Current[i].Weight = 1.0 / (Current[i].Score * InverseSum);
+    for(int NextIndex = 1; NextIndex < Settings->nextPopulationSize; NextIndex++)
+    {
+        individual Mother = individual_getRandomWeighted(Current, Settings->currentPopulationSize);
+        individual Father = individual_getRandomWeighted(Current, Settings->currentPopulationSize);
+        //TODO: check that mother != father
+        typedef typeof_member(vector, X) atomType;
+        int VectorSize = (Problem->ShapeCount - 1) * sizeof (vector);
+        int Crossover = pcg32_range(1, VectorSize / sizeof(atomType));
+        memcpy(Next[NextIndex].Point, Mother.Point, Crossover * sizeof(atomType));
+        memcpy(((atomType *)Next[NextIndex].Point) + Crossover, 
+               ((atomType *)Father.Point) + Crossover,
+               VectorSize - Crossover * sizeof(atomType));
+        int X = pcg32_range(Problem->MinOrigin.X, Problem->MaxOrigin.X + 1);
+        int Y = pcg32_range(Problem->MinOrigin.Y, Problem->MaxOrigin.Y + 1);
+        Next[NextIndex].Point[pcg32_range(0, Problem->ShapeCount - 1)] = (vector){X, Y};
+    }
+}
+
+void printEvolution(problem *Problem, int PopulationSize, int Iterations)
+{
+    individual *Current = calloc(PopulationSize, sizeof (individual));
+    individual *Next    = calloc(PopulationSize, sizeof (individual));
+    for(int IndividualIndex = 0; IndividualIndex < PopulationSize; IndividualIndex++)
+    {
+        Current[IndividualIndex].Point = malloc((Problem->ShapeCount - 1) * sizeof (vector));
+        Next[IndividualIndex].Point    = malloc((Problem->ShapeCount - 1) * sizeof (vector));
+        for(int VectorIndex = 0; VectorIndex < Problem->ShapeCount - 1; VectorIndex++)
+        {
+            int X = pcg32_range(Problem->MinOrigin.X, Problem->MaxOrigin.X + 1);
+            int Y = pcg32_range(Problem->MinOrigin.Y, Problem->MaxOrigin.Y + 1);
+            Current[IndividualIndex].Point[VectorIndex] = (vector){X, Y};
+        }
+    }
+    settings Settings =
+    {
+        .currentPopulationSize = PopulationSize,
+        .nextPopulationSize = PopulationSize
+    };
+    while(ScoreIteration < Iterations)
+    {
+        genetic_optimize(Problem, &Settings, Current, Next);
+        individual *Tmp = Current;
+        Current = Next;
+        Next = Tmp;
+    }
 }
 
 void printGrid(problem *Problem)
@@ -254,33 +340,30 @@ void printGrid(problem *Problem)
     }
 }
 
-int pcg32_range_r(pcg32_random_t *Rng, int min, int max)
+void printRandom(problem *Problem, int Iterations)
 {
-    int Result = pcg32_boundedrand_r(Rng, max - min) + min;
-    return Result;
-}
-
-void printRandom(problem *Problem, int Iterations, pcg32_random_t *Rng)
-{
-    printf("iteration, score, overlap\n");
     vector *Point = malloc((Problem->ShapeCount - 1) * sizeof (vector));
     for(int Iteration = 0; Iteration < Iterations; Iteration++)
     {
         for(int ShapeIndex = 1; ShapeIndex < Problem->ShapeCount; ShapeIndex++)
         {
-            int X = pcg32_range_r(Rng, Problem->MinOrigin.X, Problem->MaxOrigin.X + 1);
-            int Y = pcg32_range_r(Rng, Problem->MinOrigin.Y, Problem->MaxOrigin.Y + 1);
+            int X = pcg32_range(Problem->MinOrigin.X, Problem->MaxOrigin.X + 1);
+            int Y = pcg32_range(Problem->MinOrigin.Y, Problem->MaxOrigin.Y + 1);
             Point[ShapeIndex - 1] = (vector){X, Y};
         }
-        score Score = calculateScore(Problem, Point);
-        printf("%i, %i, %i\n", Iteration, Score.Score, Score.Overlap);
+        calculateScore(Problem, Point);
     }
 }
 
+
 int main()
 {
-    pcg32_random_t Rng;
-    pcg32_srandom_r(&Rng, 42u, 54u);
+
+#ifdef PRINT_ITERATIONS
+    printf("iteration, score, overlap\n");
+#endif
+
+    pcg32_srandom(42u, 54u);
 #if 0
     shape Shape0 = {2, 2, (uint8_t[]){1, 1, 1, 0}};
     shape Shape1 = {2, 2, (uint8_t[]){0, 0, 0, 1}};
@@ -293,9 +376,28 @@ int main()
     //problem Problem = problem_createFromShapes(ARRAY_COUNT(Shapes), Shapes);
     problem Problem = problem_createFromIndexes(Box_Width, Box_Height, Box);
     //printGrid(&Problem);
-    printRandom(&Problem, 20000, &Rng);
+    //printRandom(&Problem, 20000);
+    printEvolution(&Problem, 10, 20000);
     return 0;
-    for(int i = 0; i < 10; i++)
-        printf("random: 0x%X\n", pcg32_random_r(&Rng));
+}
+#endif
+
+int main()
+{
+    Problem problem = spritePacking_createProblemFromIndexes(Box0_Width, 
+                                                             Box0_Height,
+                                                             Box0);
+    GeneticSettings settings =
+    {
+        .file = fopen("data/genetic.csv", "w"),
+        .maxIteration = 40000,
+        .populationSize = 100,
+        .eliteCount = 5,
+        .mutationRate = 0.01,
+        .mutationDistance = 0.2
+    };
+    genetic_run(&problem, &settings);
+    fclose(settings.file);
+    system("python3 source/graph.py data/ -o 100");
     return 0;
 }

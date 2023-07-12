@@ -64,12 +64,21 @@ void pcg32_srandom_r(pcg32_random_t* rng, uint64_t initstate,
 uint32_t pcg32_random(void);
 uint32_t pcg32_random_r(pcg32_random_t* rng);
 
+float pcg32_fraction(void);
+float pcg32_fraction_r(pcg32_random_t* rng);
+
 // pcg32_boundedrand(bound):
 // pcg32_boundedrand_r(rng, bound):
 //     Generate a uniformly distributed number, r, where 0 <= r < bound
 
 uint32_t pcg32_boundedrand(uint32_t bound);
 uint32_t pcg32_boundedrand_r(pcg32_random_t* rng, uint32_t bound);
+
+//     Generate a uniformly distributed number, r, where min <= r < max
+
+int32_t pcg32_range(int32_t min, int32_t max);
+int32_t pcg32_range_r(pcg32_random_t* rng, int32_t min, int32_t max);
+
 
 #if __cplusplus
 }

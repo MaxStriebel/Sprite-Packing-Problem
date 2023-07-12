@@ -28,6 +28,7 @@
  * your project.
  */
 
+#include <math.h>
 #include "pcg_basic.h"
 
 // state for global RNGs
@@ -71,6 +72,15 @@ uint32_t pcg32_random()
     return pcg32_random_r(&pcg32_global);
 }
 
+float pcg32_fraction(void)
+{
+    return (float)ldexp(pcg32_random(), -32);
+}
+
+float pcg32_fraction_r(pcg32_random_t* rng)
+{
+    return (float)ldexp(pcg32_random_r(rng), -32);
+}
 
 // pcg32_boundedrand(bound):
 // pcg32_boundedrand_r(rng, bound):
@@ -114,3 +124,13 @@ uint32_t pcg32_boundedrand(uint32_t bound)
     return pcg32_boundedrand_r(&pcg32_global, bound);
 }
 
+int32_t pcg32_range_r(pcg32_random_t* rng, int32_t min, int32_t max)
+{
+    int32_t random = (int32_t)pcg32_boundedrand_r(rng, max - min);
+    return random + min;
+}
+
+int32_t pcg32_range(int32_t min, int32_t max)
+{
+    return pcg32_range_r(&pcg32_global, min, max);
+}
