@@ -355,7 +355,6 @@ void printRandom(problem *Problem, int Iterations)
     }
 }
 
-
 int main()
 {
 
@@ -387,17 +386,33 @@ int main()
     Problem problem = spritePacking_createProblemFromIndexes(Box0_Width, 
                                                              Box0_Height,
                                                              Box0);
-    GeneticSettings settings =
+    char buffer[512];
+    for(int i = 0; i < 10; i++)
     {
-        .file = fopen("data/genetic.csv", "w"),
-        .maxIteration = 40000,
-        .populationSize = 100,
-        .eliteCount = 5,
-        .mutationRate = 0.01,
-        .mutationDistance = 0.2
-    };
-    genetic_run(&problem, &settings);
-    fclose(settings.file);
-    system("python3 source/graph.py data/ -o 100");
+        snprintf(buffer, 512, "data/Score/genetic_%i.csv", i);
+        FILE *scoreFile = fopen(buffer, "w");
+        snprintf(buffer, 512, "data/Result/genetic_%i.csv", i);
+        FILE *bestResultFile = fopen(buffer, "w");
+        GeneticSettings settings =
+        {
+            .scoreFile = scoreFile,
+            .bestResultFile = bestResultFile,
+            .maxIteration = 40000,
+            .populationSize = 100,
+            .eliteCount = 5,
+            .mutationRate = 0.01,
+            .mutationDistance = 0.2
+        };
+        fprintf(scoreFile, "iterations,populationSize,eliteCount,muationRate,mutationDistance\n");
+        fprintf(scoreFile, "%li, %i, %i, %f, %f\n", settings.maxIteration, settings.populationSize,
+                settings.eliteCount, settings.mutationRate,
+                settings.mutationDistance);
+        genetic_run(&problem, &settings);
+        fclose(scoreFile);
+        fclose(bestResultFile);
+    }
+    system("python3 source/graph.py data/Score/ -o 100");
+    system("python3 source/graph.py data/Result/ -t image");
+
     return 0;
 }

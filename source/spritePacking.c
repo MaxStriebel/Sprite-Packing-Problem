@@ -185,10 +185,10 @@ Score spritePacking_calculateScore(Problem *problem, void *chromosomData)
             cell++;
         }
     }
-    int width = maxX - minX;
-    int height = maxY - minY;
+    int width = maxX - minX + 1;
+    int height = maxY - minY + 1;
     int error = MIN(width, height) * overlap;
-    //error = width * height * overlap;
+    error = width * height * overlap;
     Score Result =
     {
         .score = width * height + error,
@@ -196,6 +196,28 @@ Score spritePacking_calculateScore(Problem *problem, void *chromosomData)
         .overlap = overlap
     };
     return Result;
+}
+
+void spritePacking_printChromosom(Problem *problem, void *chromosomData, FILE *file)
+{
+    assert(file);
+    SpritePacking *packer = (SpritePacking *)problem->data;
+    assert((packer->positionFlags & (POS_POLAR | POS_RELATIVE)) == 0);
+    Chromosom chromosom = getChromosom(chromosomData, packer->spriteCount);
+    fprintf(file, "x,y,index\n");
+    for(int i = 0; i < packer->spriteCount; i++)
+    {
+        Vector2 pos = chromosom.positions[i];
+        Sprite sprite = packer->sprites[i];
+        for(int y = 0; y < sprite.dim.y; y++)
+        {
+            for(int x = 0; x < sprite.dim.x; x++)
+            {
+                if(sprite.cells[y * sprite.dim.x + x])
+                    fprintf(file, "%i, %i, %i\n", x + pos.x, y + pos.y, i + 1);
+            }
+        }
+    }
 }
 
 SpritePacking *spritePacking_createFromShapes(int spriteCount, Sprite *sprites)
@@ -286,7 +308,8 @@ Problem spritePacking_createProblemFromIndexes(int width, int height, uint8_t *i
         .initializeChromosom = spritePacking_initializeChromosom,
         .calculateScore = spritePacking_calculateScore,
         .crossover = spritePacking_crossover,
-        .mutate = spritePacking_mutate
+        .mutate = spritePacking_mutate,
+        .printChromosom = spritePacking_printChromosom
     };
     return problem;
 }

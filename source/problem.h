@@ -25,6 +25,9 @@ struct Problem
                    float mutationRate,
                    float muationDistance,
                    void *chromosom);
+    void (*printChromosom)(Problem *problem, 
+                           void *chromosomData, 
+                           FILE *file);
 };
 
 #endif

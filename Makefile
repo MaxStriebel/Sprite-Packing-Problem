@@ -10,4 +10,4 @@ run:
 	build/main
 
 test:
-	build/main > ../Report/genetic_box.csv
+	build/main

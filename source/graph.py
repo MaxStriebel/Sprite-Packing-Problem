@@ -8,22 +8,35 @@ import pandas as pd
 import numpy as np
 from scipy.signal import argrelextrema
 import argparse
+from io import StringIO
 
 
 def plotGraph(path, pdf, optimum):
-    data = pd.read_csv(path).to_numpy()
-    colormap = ListedColormap(["#071a56", "#e2060a"])
-    fig, axis = plt.subplots(1, 1)
-    colorIndex = data[:,2]
+    with open(path) as file:
+        lines = file.readlines()
+    header = pd.read_csv(StringIO('\n'.join(lines[:2])))
+    data = pd.read_csv(StringIO('\n'.join(lines[2:])))
+    iteration = data['iteration'].to_numpy()
+    score = data['score'].to_numpy()
+    overlap = data['overlap'].to_numpy()
+    colorIndex = overlap
     colorIndex[colorIndex > 0] = 1
-    axis.scatter(data[:,0], data[:,1], c = colorIndex, marker='x', cmap=colormap, linewidths=1)
-    axis.axhline(optimum, color='black', dashes=[4, 2], linewidth=1, label='optimum')
-    axis.set_ylim([0, 11.9 * optimum])
-    fileName = basename(path)
+
+    settings = '\n'.join(['{}: {}'.format(name, values[0]) for name, values in header.items()])
     errorCount = sum(colorIndex)
     totalCount = len(colorIndex)
-    best = min(data[:, 1])
-    fig.suptitle('{}\nerror: {}/{}\nmin: {}'.format(fileName, errorCount, totalCount, best))
+    best = min(score)
+    stats = 'error: {}/{}\nmin: {}'.format(errorCount, totalCount, best)
+
+
+    colormap = ListedColormap(["#071a56", "#e2060a"])
+    fig, axis = plt.subplots(1, 1)
+    axis.scatter(iteration, score, c = colorIndex, marker='x', cmap=colormap, linewidths=1)
+    axis.axhline(optimum, color='black', dashes=[4, 2], linewidth=1, label='optimum')
+    axis.set_ylim([0, 11.9 * optimum])
+    #fig.suptitle(basename(path))
+    fig.text(0.68, 0.8, stats, verticalalignment='top')
+    fig.text(0.4, 0.85, settings, verticalalignment='top')
     plt.legend()
     pdf.savefig()
     plt.close()

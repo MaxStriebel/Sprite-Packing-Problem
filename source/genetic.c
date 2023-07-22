@@ -4,7 +4,8 @@
 
 typedef struct
 {
-    FILE *file;
+    FILE *scoreFile;
+    FILE *bestResultFile;
     uint64_t maxIteration;
     int populationSize;
     int eliteCount;
@@ -25,6 +26,7 @@ typedef struct
     GeneticSettings *settings;
     Individual *current;
     Individual *next;
+    Individual best;
     uint64_t iteration;
 }Context;
 
@@ -51,10 +53,23 @@ void calculateAndPrintScore(Context *context, Individual *individual)
 {
     Score score = context->problem->calculateScore(context->problem, individual->chromosom);
     individual->score = score.score;
-    if(context->settings->file)
-        fprintf(context->settings->file, "%li, %i, %i\n", 
+    if(context->settings->scoreFile)
+        fprintf(context->settings->scoreFile, "%li, %i, %i\n", 
                 context->iteration, score.score, score.overlap);
+    if(context->best.score > score.score)
+    {
+        memcpy(context->best.chromosom, 
+               individual->chromosom, 
+               context->problem->chromosomSize);
+        context->best.score = score.score;
+    }
     context->iteration++;
+}
+
+void printCSVHeader(Context *context)
+{
+    if(context->settings->scoreFile)
+        fprintf(context->settings->scoreFile, "iteration,score,overlap\n");
 }
 
 void genetic_step(Context *context)
@@ -103,8 +118,15 @@ void genetic_run(Problem *problem, GeneticSettings *settings)
         .current = calloc(settings->populationSize + 1, sizeof (Individual)),
         .next    = calloc(settings->populationSize + 1, sizeof (Individual))
     };
-    size_t individualCount = settings->populationSize * 2 + 2;
+    printCSVHeader(&context);
+    size_t individualCount = settings->populationSize * 2 + 3;
     char *chromosomes = malloc(individualCount * problem->chromosomSize);
+    context.best = (Individual)
+    {
+        .chromosom = chromosomes,
+        .score = INT_MAX,
+    };
+    chromosomes += problem->chromosomSize;
     for(int i = 0; i < settings->populationSize + 1; i++)
     {
         context.current[i].chromosom = chromosomes;
@@ -124,5 +146,8 @@ void genetic_run(Problem *problem, GeneticSettings *settings)
         context.current = context.next;
         context.next = Tmp;
     }
+    if(problem->printChromosom && settings->bestResultFile)
+        problem->printChromosom(problem, context.best.chromosom, 
+                                settings->bestResultFile);
 }
 
