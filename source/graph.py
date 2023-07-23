@@ -34,7 +34,7 @@ def plotGraph(path, pdf, optimum):
     axis.scatter(iteration, score, c = colorIndex, marker='x', cmap=colormap, linewidths=1)
     axis.axhline(optimum, color='black', dashes=[4, 2], linewidth=1, label='optimum')
     axis.set_ylim([0, 11.9 * optimum])
-    #fig.suptitle(basename(path))
+    fig.suptitle(basename(path))
     fig.text(0.68, 0.8, stats, verticalalignment='top')
     fig.text(0.4, 0.85, settings, verticalalignment='top')
     plt.legend()
@@ -47,25 +47,29 @@ def plotImage(path, pdf):
     xMin = min(data[:, 0])
     yMax = max(data[:, 1])
     yMin = min(data[:, 1])
+    score = (xMax - xMin + 1) * (yMax - yMin + 1)
     image = np.zeros((yMax-yMin+1, xMax-xMin+1))
+    alpha = np.zeros((yMax-yMin+1, xMax-xMin+1))
     for rowIndex in range(data.shape[0]):
         row = data[rowIndex, :]
         image[row[1]-yMin, row[0]-xMin] = row[2]
+        alpha[row[1]-yMin, row[0]-xMin] = 1
 
     fig, axis = plt.subplots(1, 1)
-    imshow = axis.imshow(image, cmap='plasma', extent=[xMin-.5, xMax+.5, yMax+.5, yMin-.5])
+    imshow = axis.imshow(image, cmap='plasma', alpha=alpha, extent=[xMin-.5, xMax+.5, yMax+.5, yMin-.5])
     localMinima0 = set(zip(* argrelextrema(image, np.less, axis=0, mode='wrap')))
     localMinima1 = set(zip(* argrelextrema(image, np.less, axis=1, mode='wrap')))
     localMinima = localMinima0.intersection(localMinima1)
     for (y, x) in localMinima:
         axis.text(x + xMin, y + yMin, "X", ha="center", va="center", color="w")
     fig.colorbar(imshow)
-    fig.suptitle(splitext(basename(path))[0])
+    fig.suptitle("{}\n{}".format(basename(path), score))
     pdf.savefig()
     plt.close()
     
 def createPdf(directory, plot):
     files = [file for file in [join(directory, name) for name in listdir(directory)] if splitext(file)[1] == ".csv"]
+    files.sort()
     with PdfPages(join(directory, 'plots.pdf')) as pdf:
         for file in files:
             plot(file, pdf)

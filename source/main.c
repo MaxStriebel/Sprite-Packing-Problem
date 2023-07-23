@@ -383,9 +383,9 @@ int main()
 
 int main()
 {
-    Problem problem = spritePacking_createProblemFromIndexes(Box0_Width, 
-                                                             Box0_Height,
-                                                             Box0);
+    Problem problem = spritePacking_createProblemFromIndexes(Box1_Width, 
+                                                             Box1_Height,
+                                                             Box1);
     char buffer[512];
     for(int i = 0; i < 10; i++)
     {
@@ -397,14 +397,16 @@ int main()
         {
             .scoreFile = scoreFile,
             .bestResultFile = bestResultFile,
-            .maxIteration = 40000,
+            .maxIteration = 15000,
             .populationSize = 100,
             .eliteCount = 5,
             .mutationRate = 0.01,
-            .mutationDistance = 0.2
+            .mutationDistance = 0.1
         };
-        fprintf(scoreFile, "iterations,populationSize,eliteCount,muationRate,mutationDistance\n");
-        fprintf(scoreFile, "%li, %i, %i, %f, %f\n", settings.maxIteration, settings.populationSize,
+        fprintf(scoreFile, "iterations,populationSize,eliteCount,muationRate,"
+                           "mutationDistance\n");
+        fprintf(scoreFile, "%li, %i, %i, %f, %f\n", 
+                settings.maxIteration, settings.populationSize,
                 settings.eliteCount, settings.mutationRate,
                 settings.mutationDistance);
         genetic_run(&problem, &settings);
