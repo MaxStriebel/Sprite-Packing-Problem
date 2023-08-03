@@ -1,17 +1,12 @@
 #include <stdint.h>
 #include <float.h>
+#include <assert.h>
+#include <string.h>
+#include <stdlib.h>
+#include <limits.h>
 #include "problem.h"
-
-typedef struct
-{
-    FILE *scoreFile;
-    FILE *bestResultFile;
-    uint64_t maxIteration;
-    int populationSize;
-    int eliteCount;
-    float mutationRate;
-    float mutationDistance;
-}GeneticSettings;
+#include "genetic.h"
+#include "pcg_basic.h"
 
 typedef struct
 {
@@ -30,12 +25,12 @@ typedef struct
     uint64_t iteration;
 }Context;
 
-int individual_compareDesc(const void *a, const void *b)
+static int individual_compareDesc(const void *a, const void *b)
 {
     return ((Individual *)a)->weight < ((Individual *)b)->weight;
 }
 
-Individual individual_getRandomWeighted(Individual *Individuals, int Count)
+static Individual individual_getRandomWeighted(Individual *Individuals, int Count)
 {
     float target = pcg32_random() / (double)UINT32_MAX;
     double Sum = 0;
@@ -49,14 +44,14 @@ Individual individual_getRandomWeighted(Individual *Individuals, int Count)
     return Individuals[Count - 1];
 }
 
-void calculateAndPrintScore(Context *context, Individual *individual)
+static void calculateAndPrintScore(Context *context, Individual *individual)
 {
     Score score = context->problem->calculateScore(context->problem, individual->chromosom);
     individual->score = score.score;
     if(context->settings->scoreFile)
-        fprintf(context->settings->scoreFile, "%li, %i, %i\n", 
-                context->iteration, score.score, score.overlap);
-    if(context->best.score > score.score)
+        fprintf(context->settings->scoreFile, "%li, %i, %i, %i\n", 
+                context->iteration, score.score, score.rawScore, score.overlap);
+    if(score.overlap == 0 && context->best.score > score.score)
     {
         memcpy(context->best.chromosom, 
                individual->chromosom, 
@@ -66,13 +61,26 @@ void calculateAndPrintScore(Context *context, Individual *individual)
     context->iteration++;
 }
 
-void printCSVHeader(Context *context)
+static void printCSVHeader(Context *context)
 {
     if(context->settings->scoreFile)
-        fprintf(context->settings->scoreFile, "iteration,score,overlap\n");
+        fprintf(context->settings->scoreFile, "iteration,score,rawScore,overlap\n");
 }
 
-void genetic_step(Context *context)
+static bool currentHaveSameScore(Context *context)
+{
+    Problem *problem = context->problem;
+    GeneticSettings *settings = context->settings;
+    Individual *current = context->current;
+
+    int score = current[0].score;
+    for(int i = 0; i < settings->populationSize; i++)
+        if(current[i].score != score)
+            return false;
+    return true;
+}
+
+static bool genetic_step(Context *context)
 {
     Problem *problem = context->problem;
     GeneticSettings *settings = context->settings;
@@ -83,7 +91,12 @@ void genetic_step(Context *context)
     for(int i = 0; i < settings->populationSize; i++)
         totalInvScore += 1.0 / current[i].score;
     for(int i = 0; i < settings->populationSize; i++)
-        current[i].weight = (1.0 / current[i].score) / totalInvScore;
+    {
+        if(settings->randomSelection)
+            current[i].weight = 1.0 / settings->populationSize;
+        else
+            current[i].weight = (1.0 / current[i].score) / totalInvScore;
+    }
     qsort(current, settings->populationSize, sizeof (Individual), individual_compareDesc);
     for(int i = 0; i < settings->eliteCount; i++)
     {
@@ -106,7 +119,10 @@ void genetic_step(Context *context)
                     settings->mutationDistance, next[i+1].chromosom);
             calculateAndPrintScore(context, next + i + 1);
         }
+        if(pcg32_fraction() <= settings->restartProbability)
+            return true;
     }
+    return false;
 }
 
 void genetic_run(Problem *problem, GeneticSettings *settings)
@@ -141,7 +157,15 @@ void genetic_run(Problem *problem, GeneticSettings *settings)
 
     while(context.iteration < settings->maxIteration)
     {
-        genetic_step(&context);
+        if((settings->restartWhenSameScore && currentHaveSameScore(&context))
+                    || genetic_step(&context))
+        {
+            for(int i = 0; i < settings->populationSize; i++)
+            {
+                problem->initializeChromosom(problem, context.next[i].chromosom);
+                calculateAndPrintScore(&context, &context.next[i]);
+            }
+        }
         Individual *Tmp = context.current;
         context.current = context.next;
         context.next = Tmp;
@@ -150,4 +174,3 @@ void genetic_run(Problem *problem, GeneticSettings *settings)
         problem->printChromosom(problem, context.best.chromosom, 
                                 settings->bestResultFile);
 }
-

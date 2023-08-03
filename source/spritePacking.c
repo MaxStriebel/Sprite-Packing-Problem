@@ -1,18 +1,22 @@
 #include "vector2.h"
 #include "problem.h"
 #include "pcg_basic.h"
+#include <math.h>
+
+typedef struct
+{
+    int width;
+    int height;
+    uint8_t *indexes;
+    char *name;
+}Sprites;
 
 typedef enum
 {
-    POS_ABSOLUTE_CARTESIAN,
-    POS_ABSOLUTE_DIRECTION
+    POS_CARTESIAN,
+    MOV_DIRECTION,
+    MOV_CARTESIAN
 }PositionEncoding;
-
-typedef enum
-{
-    ENC_INT,
-    //ECN_GREY
-}EncodingType;
 
 typedef struct
 {
@@ -23,7 +27,12 @@ typedef struct
 typedef struct
 {
     PositionEncoding positionEncoding;
-    EncodingType encodingType;
+    bool disableErrorTerm;
+}SpritePackerSettings;
+
+typedef struct
+{
+    SpritePackerSettings settings;
     int spriteCount;
     Sprite *sprites;
     
@@ -77,7 +86,7 @@ void spritePacking_initializeChromosom(Problem *problem, void *chromosomData)
             .direction = pcg32_fraction(),
         };
     }
-    if(packer->positionEncoding == POS_ABSOLUTE_DIRECTION)
+    if(packer->settings.positionEncoding == MOV_DIRECTION)
     {
         for(int i = 0; i < packer->spriteCount - 1; i++)
         {
@@ -127,7 +136,8 @@ void spritePacking_crossover(Problem *problem,
     Chromosom *child0 = (Chromosom *)child0Data;
     Chromosom *child1 = (Chromosom *)child1Data;
 
-    if(packer->positionEncoding == POS_ABSOLUTE_CARTESIAN) 
+    if(packer->settings.positionEncoding == POS_CARTESIAN ||
+       packer->settings.positionEncoding == MOV_CARTESIAN) 
     {   
         //Single crossover point without reordering 
         int crossover = pcg32_boundedrand(packer->spriteCount);
@@ -138,7 +148,7 @@ void spritePacking_crossover(Problem *problem,
         memcpy(&child1[crossover], &mother[crossover], 
                 sizeof(Chromosom[packer->spriteCount - crossover]));
     }
-    else if(packer->positionEncoding == POS_ABSOLUTE_DIRECTION)
+    else if(packer->settings.positionEncoding == MOV_DIRECTION)
     {
         //Single segment order crossover
         int p0 = pcg32_boundedrand(packer->spriteCount);
@@ -168,7 +178,8 @@ void spritePacking_mutate(Problem *problem,
         {
             if(pcg32_fraction() <= mutationRate)
             {
-                if(packer->positionEncoding == POS_ABSOLUTE_CARTESIAN)
+                if(packer->settings.positionEncoding == POS_CARTESIAN ||
+                   packer->settings.positionEncoding == MOV_CARTESIAN)
                 {
                     int bounds = packer->bounds.i[dimension];
                     int maxDistance = bounds * mutationDistance;
@@ -178,7 +189,7 @@ void spritePacking_mutate(Problem *problem,
                     int spriteSize = packer->sprites[spriteIndex].dim.i[dimension];
                     *value = CLAMP(newValue, 0, bounds - spriteSize - 1);
                 }
-                else if(packer->positionEncoding == POS_ABSOLUTE_DIRECTION)
+                else if(packer->settings.positionEncoding == MOV_DIRECTION)
                 {
                     if(dimension == 0)
                     {
@@ -260,27 +271,59 @@ void blitSprite(SpritePacking *packer, Sprite sprite, int xOffset, int yOffset)
     }
 }
 
+static int chromosom_distance(const void *a, const void *b)
+{
+    Vector2 pA = ((Chromosom *)a)->position;
+    Vector2 pB = ((Chromosom *)b)->position;
+    float distA = pA.x * pA.x + pA.y * pA.y;
+    float distB = pB.x * pB.x + pB.y * pB.y;
+    return distA - distB;
+}
+
+static int chromosom_index(const void *a, const void *b)
+{
+    Chromosom *chromosomA = (Chromosom *)a;
+    Chromosom *chromosomB = (Chromosom *)b;
+    return chromosomA->index - chromosomB->index;
+}
+
 static void calculatePositions(SpritePacking *packer, Chromosom *chromosom)
 {
+    if(packer->settings.positionEncoding == MOV_CARTESIAN)
+        qsort(chromosom, packer->spriteCount, sizeof(Chromosom), chromosom_distance);
+    memset(packer->cells, 0, packer->cellCount);
     for(int i = 0; i < packer->spriteCount; i++)
     {
-        int index = findIndex(chromosom, packer->spriteCount, i);
-        assert(index >= 0);
-        float direction = chromosom[index].direction;
+        int index;
+        float direction;
+        if(packer->settings.positionEncoding == MOV_CARTESIAN)
+        {
+            index = i;
+            direction = atan2(chromosom[i].position.y, chromosom[i].position.x);
+            direction /= (M_PI / 2);
+        }
+        else
+        {
+            index = findIndex(chromosom, packer->spriteCount, i);
+            assert(index >= 0);
+            direction = chromosom[index].direction;
+        }
         assert(direction >= 0);
         assert(direction <= 1);
-        Sprite sprite = packer->sprites[index];
+        Sprite sprite = packer->sprites[chromosom[index].index];
         Vector2 bounds = vector2_sub(packer->bounds, sprite.dim);
         bool horizontal = direction < 0.5;
-        int dx, dy;
+        int dx, dy, maxX;
         if(horizontal)
         {
             dx = packer->bounds.x;
+            maxX = bounds.x;
             dy = direction * 2 * packer->bounds.y;
         }
         else
         {
             dx = packer->bounds.y;
+            maxX = bounds.y;
             dy = (1 - direction) * 2 * packer->bounds.x;
         }
         int y = 0;
@@ -289,7 +332,7 @@ static void calculatePositions(SpritePacking *packer, Chromosom *chromosom)
         {
             int realX = horizontal ? x : y;
             int realY = horizontal ? y : x;
-            if(doesSpriteFit(packer, sprite, realX, realY) || x + 1 == dx)
+            if(doesSpriteFit(packer, sprite, realX, realY) || x + 1 >= maxX)
             {
                 chromosom[index].position = (Vector2){.x = realX, .y = realY};
                 blitSprite(packer, sprite, realX, realY);
@@ -303,24 +346,26 @@ static void calculatePositions(SpritePacking *packer, Chromosom *chromosom)
             D += 2 * dy;
         }
     }
+    if(packer->settings.positionEncoding == MOV_CARTESIAN)
+        qsort(chromosom, packer->spriteCount, sizeof(Chromosom), chromosom_index);
 }
 
 Score spritePacking_calculateScore(Problem *problem, void *chromosomData)
 {
     SpritePacking *packer = (SpritePacking *)problem->data;
     Chromosom *chromosom = (Chromosom *)chromosomData;
-    memset(packer->cells, 0, packer->cellCount);
-    if(packer->positionEncoding == POS_ABSOLUTE_CARTESIAN)
+    if(packer->settings.positionEncoding == MOV_CARTESIAN ||
+       packer->settings.positionEncoding == MOV_DIRECTION)
     {
+        calculatePositions(packer, chromosom);
+    }
+    memset(packer->cells, 0, packer->cellCount);
         for(int i = 0; i < packer->spriteCount; i++)
         {
             Vector2 position = chromosom[i].position;
-            Sprite sprite = packer->sprites[i];
+            Sprite sprite = packer->sprites[chromosom[i].index];
             blitSprite(packer, sprite, position.x, position.y);
         }
-    }
-    else
-        calculatePositions(packer, chromosom);
     int minX = INT_MAX;
     int minY = INT_MAX;
     int maxX = INT_MIN;
@@ -344,8 +389,11 @@ Score spritePacking_calculateScore(Problem *problem, void *chromosomData)
     }
     int width = maxX - minX + 1;
     int height = maxY - minY + 1;
-    int error = MIN(width, height) * overlap;
-    error = width * height * overlap;
+    int error = MAX(packer->bounds.x, packer->bounds.y) * overlap;
+    if(error > packer->bounds.x * packer->bounds.y)
+        error = packer->bounds.x * packer->bounds.y;
+    if(packer->settings.disableErrorTerm)
+        error = 0;
     Score Result =
     {
         .score = width * height + error,
@@ -364,16 +412,25 @@ void spritePacking_printChromosom(Problem *problem, void *chromosomData, FILE *f
     for(int i = 0; i < packer->spriteCount; i++)
     {
         Vector2 pos = chromosom[i].position;
-        Sprite sprite = packer->sprites[i];
+        int spriteIndex = chromosom[i].index;
+        Sprite sprite = packer->sprites[spriteIndex];
         for(int y = 0; y < sprite.dim.y; y++)
         {
             for(int x = 0; x < sprite.dim.x; x++)
             {
                 if(sprite.cells[y * sprite.dim.x + x])
-                    fprintf(file, "%i, %i, %i\n", x + pos.x, y + pos.y, i);
+                    fprintf(file, "%i, %i, %i\n", x + pos.x, y + pos.y, spriteIndex);
             }
         }
     }
+}
+
+void spritePacking_printProblem(int width, int height, uint8_t *indexes, FILE *file)
+{
+    fprintf(file, "x,y,index\n");
+    for(int y = 0; y < height; y++)
+        for(int x = 0; x < width; x++)
+            fprintf(file, "%i, %i, %i\n", x, y, indexes[y * width + x]);
 }
 
 SpritePacking *spritePacking_createFromShapes(int spriteCount, Sprite *sprites)
@@ -396,8 +453,6 @@ SpritePacking *spritePacking_createFromShapes(int spriteCount, Sprite *sprites)
     SpritePacking *result = malloc(sizeof (SpritePacking));
     *result = (SpritePacking)
     {
-        .positionEncoding = POS_ABSOLUTE_CARTESIAN,
-        .encodingType = ENC_INT,
         .spriteCount = spriteCount,
         .sprites = sprites,
         .bounds.x = cellWidth,
@@ -455,12 +510,22 @@ SpritePacking *spritePacking_createFromIndexes(int width,
     return result;
 }
 
-Problem spritePacking_createProblemFromIndexes(int width, int height, uint8_t *indexes)
+void spritePacking_setSettings(Problem *problem, SpritePackerSettings settings)
 {
-    SpritePacking *packing = spritePacking_createFromIndexes(width, height, indexes);
+    SpritePacking *packer = (SpritePacking *)problem->data;
+    packer->settings = settings;
+}
+
+Problem spritePacking_createProblemFromIndexes(Sprites sprites)
+{
+    SpritePacking *packing = spritePacking_createFromIndexes(
+                             sprites.width, sprites.height, sprites.indexes);
     Problem problem = 
     {
         .data = packing,
+        .name = sprites.name,
+        .width = sprites.width,
+        .height = sprites.height,
         .chromosomSize = sizeof(Chromosom[packing->spriteCount]),
         .initializeChromosom = spritePacking_initializeChromosom,
         .calculateScore = spritePacking_calculateScore,
@@ -468,5 +533,6 @@ Problem spritePacking_createProblemFromIndexes(int width, int height, uint8_t *i
         .mutate = spritePacking_mutate,
         .printChromosom = spritePacking_printChromosom
     };
+    printf("%s bounds: [%i, %i]\n", problem.name, packing->bounds.x, packing->bounds.y);
     return problem;
 }

@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdio.h>
 
 typedef struct
 {
@@ -16,6 +17,9 @@ typedef struct Problem Problem;
 struct Problem
 {
     void *data;
+    char *name;
+    int width;
+    int height;
     size_t chromosomSize;
     void (*initializeChromosom)(Problem *, void *);
     Score (*calculateScore)(Problem *, void *);
